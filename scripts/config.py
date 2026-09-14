@@ -6,6 +6,9 @@ read their structure from the generated JSON, so no other file needs to
 change.
 
 Only outlets with a public, stable feed are listed. Verified 2026-09.
+
+Each feed takes an optional "fallbacks" list: alternate endpoints for the same
+outlet, tried in order when the primary URL errors or returns a non-feed body.
 """
 
 # --- tunables -----------------------------------------------------------------
@@ -21,9 +24,11 @@ PER_SOURCE_CAP = 9
 # keeps the page fresh while still tolerating a quiet weekend.
 MAX_AGE_HOURS = 72
 
-# Network behaviour.
+# Network behaviour. Retries back off (0.8s, 1.6s, 3.2s ...) and honour
+# Retry-After, so three attempts still land well inside the job budget while
+# surviving the rate limiting a shared GitHub runner IP attracts.
 FETCH_TIMEOUT = 25
-FETCH_RETRIES = 2
+FETCH_RETRIES = 3
 FEED_WORKERS = 8
 
 # Translation: total wall-clock ceiling for the whole stage, and how many
@@ -146,6 +151,12 @@ FEEDS = [
         "home": "https://www.nasa.gov",
         "category": "science",
         "url": "https://www.nasa.gov/rss/dyn/breaking_news.rss",
+        # NASA fronts several endpoints with one rate limiter, so from a shared
+        # runner IP these mostly fail together - the backoff is what saves it.
+        "fallbacks": [
+            "https://www.nasa.gov/feed/",
+            "https://www.nasa.gov/news-release/feed/",
+        ],
     },
     {
         "id": "nature",
@@ -153,6 +164,9 @@ FEEDS = [
         "home": "https://www.nature.com",
         "category": "science",
         "url": "https://www.nature.com/nature.rss",
+        # A single second endpoint: Nature's edge occasionally answers a
+        # datacentre IP with an HTML challenge page instead of the feed.
+        "fallbacks": ["https://www.nature.com/nature/current-issue.rss"],
         # Nature is a weekly journal - a 72h window would yield one item a day.
         "max_age_hours": 24 * 14,
     },
@@ -162,6 +176,21 @@ FEEDS = [
         "home": "https://phys.org",
         "category": "science",
         "url": "https://phys.org/rss-feed/",
+    },
+    # Two more science outlets so a single blocked feed cannot gut the section.
+    {
+        "id": "science-news",
+        "name": "Science News",
+        "home": "https://www.sciencenews.org",
+        "category": "science",
+        "url": "https://www.sciencenews.org/feed",
+    },
+    {
+        "id": "new-scientist",
+        "name": "New Scientist",
+        "home": "https://www.newscientist.com",
+        "category": "science",
+        "url": "https://www.newscientist.com/feed/home/",
     },
 ]
 

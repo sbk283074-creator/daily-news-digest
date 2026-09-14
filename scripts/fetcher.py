@@ -10,8 +10,10 @@ import gzip
 import hashlib
 import html
 import io
+import random
 import re
 import socket
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -41,8 +43,82 @@ _BLOCK_RE = re.compile(r"</?(p|div|br|li|h[1-6]|tr|blockquote)[^>]*>", re.I)
 _SCRIPT_RE = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.I | re.S)
 
 
-def http_get(url: str, timeout: int = FETCH_TIMEOUT, retries: int = FEED_RETRIES) -> bytes:
-    """GET a URL with retries, transparent gzip/deflate decoding and a real UA."""
+class NonFeedPayload(Exception):
+    """HTTP 200, but the body is an HTML wall page rather than a feed.
+
+    Cloudflare and friends happily return a challenge page to datacentre IPs
+    (GitHub runners included) with a 200 status, so status codes alone are not
+    enough to tell a good fetch from a broken one.
+    """
+
+
+class _RetryAfter(Exception):
+    """Internal signal: back off for `delay` seconds, then try again."""
+
+    def __init__(self, delay: float):
+        super().__init__(f"rate limited, retry in {delay:.1f}s")
+        self.delay = delay
+
+
+# A feed always starts with markup such as <?xml, <rss, <feed or <rdf:RDF.
+# An HTML doctype means we were served a wall page.
+_HTML_START_RE = re.compile(rb"^\s*(?:<!doctype\s+html|<html)", re.I)
+_RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
+
+
+def _looks_like_html(raw: bytes) -> bool:
+    return bool(_HTML_START_RE.match(raw[:400]))
+
+
+def _retry_after(headers) -> float:
+    """Seconds to wait, per RFC 9110: either a delta or an HTTP-date."""
+    value = (headers.get("Retry-After") or "").strip() if headers else ""
+    if not value:
+        return 0.0
+    try:
+        return max(0.0, min(float(value), 20.0))
+    except ValueError:
+        pass
+    try:
+        when = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if when is None:
+        return 0.0
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return max(0.0, min((when - datetime.now(timezone.utc)).total_seconds(), 20.0))
+
+
+def _backoff(attempt: int) -> float:
+    """0.8s, 1.6s, 3.2s ... with a little jitter so parallel workers desync."""
+    return round(0.8 * (2 ** attempt) + random.uniform(0, 0.4), 2)
+
+
+def _decompress(raw: bytes, encoding: str) -> bytes:
+    if encoding == "gzip" or raw[:2] == b"\x1f\x8b":
+        return gzip.GzipFile(fileobj=io.BytesIO(raw)).read()
+    if encoding == "deflate" or raw[:1] == b"\x78":
+        try:
+            return zlib.decompress(raw)
+        except zlib.error:
+            return zlib.decompress(raw, -zlib.MAX_WBITS)
+    return raw
+
+
+def http_get(
+    url: str,
+    timeout: int = FETCH_TIMEOUT,
+    retries: int = FEED_RETRIES,
+    expect_feed: bool = True,
+) -> bytes:
+    """GET a URL with backed-off retries and transparent gzip/deflate decoding.
+
+    Datacentre IPs get rate limited (NASA answers 429) and bot-walled (Nature
+    answers 200 with an HTML challenge), so a naive fetch loop silently loses
+    whole outlets. Here a retryable status or an HTML body both back off and
+    try again instead of failing the moment the first attempt goes wrong.
+    """
     last: Exception | None = None
     for attempt in range(retries + 1):
         try:
@@ -54,19 +130,34 @@ def http_get(url: str, timeout: int = FETCH_TIMEOUT, retries: int = FEED_RETRIES
                     "Accept-Language": "en-US,en;q=0.9",
                 },
             )
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            try:
+                resp = urllib.request.urlopen(req, timeout=timeout)
+            except urllib.error.HTTPError as exc:
+                if exc.code in _RETRYABLE_STATUS and attempt < retries:
+                    raise _RetryAfter(_retry_after(exc.headers) or _backoff(attempt)) from exc
+                raise
+            with resp:
                 raw = resp.read()
                 enc = (resp.headers.get("Content-Encoding") or "").lower()
-            if enc == "gzip" or raw[:2] == b"\x1f\x8b":
-                raw = gzip.GzipFile(fileobj=io.BytesIO(raw)).read()
-            elif enc == "deflate" or raw[:1] == b"\x78":
-                try:
-                    raw = zlib.decompress(raw)
-                except zlib.error:
-                    raw = zlib.decompress(raw, -zlib.MAX_WBITS)
+                final_url = resp.geturl()
+            raw = _decompress(raw, enc)
+            if expect_feed and _looks_like_html(raw):
+                raise NonFeedPayload(f"{final_url} returned HTML, not a feed")
             return raw
+        except _RetryAfter as exc:
+            last = exc
+            if attempt < retries:
+                time.sleep(exc.delay)
+        except NonFeedPayload as exc:
+            # Usually a bot wall, occasionally a transient error page - one
+            # more try after a pause is worth it, then give up.
+            last = exc
+            if attempt < retries:
+                time.sleep(_backoff(attempt))
         except (urllib.error.URLError, socket.timeout, OSError, ValueError) as exc:
             last = exc
+            if attempt < retries:
+                time.sleep(_backoff(attempt))
     raise last if last else RuntimeError("unreachable")
 
 
@@ -356,15 +447,32 @@ def parse_feed(raw: bytes, feed: dict) -> list[dict]:
     return articles
 
 
-def fetch_feed(feed: dict) -> tuple[dict, list[dict], str | None]:
+def _short_host(url: str) -> str:
     try:
-        raw = http_get(feed["url"])
-        items = parse_feed(raw, feed)
-        if not items:
-            return feed, [], "parsed 0 items"
-        return feed, items, None
-    except Exception as exc:  # noqa: BLE001 - one bad feed must not kill the run
-        return feed, [], f"{type(exc).__name__}: {exc}"
+        return urllib.parse.urlsplit(url).netloc
+    except ValueError:
+        return url[:40]
+
+
+def fetch_feed(feed: dict) -> tuple[dict, list[dict], str | None]:
+    """Fetch one outlet, walking `fallbacks` if the primary URL disappoints.
+
+    A single outlet can publish the same feed behind several endpoints, and
+    which one a given network can reach varies. Trying them in order turns a
+    hard failure into a slower success.
+    """
+    urls = [feed["url"], *(feed.get("fallbacks") or [])]
+    problems: list[str] = []
+    for url in urls:
+        try:
+            raw = http_get(url)
+            items = parse_feed(raw, feed)
+            if items:
+                return feed, items, None
+            problems.append(f"{_short_host(url)}: parsed 0 items")
+        except Exception as exc:  # noqa: BLE001 - one bad feed must not kill the run
+            problems.append(f"{_short_host(url)}: {type(exc).__name__}: {exc}")
+    return feed, [], " | ".join(problems)
 
 
 # --------------------------------------------------------------------------- #
