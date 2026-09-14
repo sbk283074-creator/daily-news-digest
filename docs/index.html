@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Daily Brief — 每日简报</title>
+<meta name="description" content="A daily digest of world, technology, business and science news, gathered from 16 trusted outlets every morning.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23111'/%3E%3Crect x='7' y='8' width='18' height='3' rx='1.5' fill='%23fff'/%3E%3Crect x='7' y='14' width='12' height='2.4' rx='1.2' fill='%23fff' opacity='.75'/%3E%3Crect x='7' y='19' width='15' height='2.4' rx='1.2' fill='%23fff' opacity='.55'/%3E%3Crect x='7' y='24' width='9' height='2.4' rx='1.2' fill='%23e11d48'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header class="masthead">
+  <div class="wrap masthead__inner">
+    <div class="brand">
+      <a class="brand__mark" href="./" aria-hidden="true">
+        <span></span><span></span><span class="accent"></span>
+      </a>
+      <div class="brand__text">
+        <a class="brand__name" href="./" data-i18n="title">The Daily Brief</a>
+        <p class="brand__tagline" data-i18n="tagline">Trusted world, tech, business and science headlines, every morning.</p>
+      </div>
+    </div>
+
+    <div class="masthead__meta">
+      <div class="meta__line"><span class="meta__dot"></span><span id="editionLabel">&mdash;</span></div>
+      <div class="meta__line meta__line--sub" id="updatedLabel">&mdash;</div>
+    </div>
+
+    <div class="masthead__actions">
+      <div class="seg" role="group" aria-label="Language">
+        <button type="button" class="seg__btn is-on" data-lang="en">EN</button>
+        <button type="button" class="seg__btn" data-lang="zh">中文</button>
+      </div>
+      <button type="button" class="icon-btn" id="themeToggle" title="Theme">
+        <svg class="i-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.4"/><g stroke-width="1.9" stroke-linecap="round"><path d="M12 2.4v2.6M12 19v2.6M2.4 12h2.6M19 12h2.6M5.2 5.2l1.9 1.9M16.9 16.9l1.9 1.9M18.8 5.2l-1.9 1.9M7.1 16.9l-1.9 1.9"/></g></svg>
+        <svg class="i-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 14.2A8.4 8.4 0 0 1 9.8 4a8.5 8.5 0 1 0 10.2 10.2z"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<nav class="toolbar" aria-label="Filters">
+  <div class="wrap toolbar__inner">
+    <div class="tabs" id="tabs" role="tablist"></div>
+
+    <div class="tools">
+      <div class="field field--search">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.7" cy="10.7" r="6.4"/><path d="M15.4 15.4 20.5 20.5" stroke-linecap="round"/></svg>
+        <input type="search" id="search" autocomplete="off" spellcheck="false" data-i18n-attr="placeholder:searchPlaceholder" placeholder="Search headlines, sources…">
+        <button type="button" class="field__clear" id="searchClear" hidden aria-label="Clear">&times;</button>
+      </div>
+      <div class="field field--select">
+        <select id="sourceFilter" aria-label="Source"></select>
+      </div>
+      <div class="field field--select">
+        <select id="archiveFilter" aria-label="Edition"></select>
+      </div>
+    </div>
+  </div>
+</nav>
+
+<main class="wrap main" id="main">
+
+  <section class="hero" id="hero" hidden aria-label="Top stories">
+    <div class="section-head">
+      <h2 data-i18n="topStories">Top stories</h2>
+      <span class="section-head__rule"></span>
+    </div>
+    <div class="hero__grid" id="heroGrid"></div>
+  </section>
+
+  <section class="feed" id="feedSection">
+    <div class="section-head">
+      <h2 id="feedTitle" data-i18n="allNews">All news</h2>
+      <span class="section-head__rule"></span>
+      <span class="section-head__count" id="feedCount"></span>
+    </div>
+    <div class="grid" id="grid"></div>
+  </section>
+
+  <div class="state" id="state" hidden>
+    <div class="state__box">
+      <div class="state__icon" id="stateIcon"></div>
+      <h3 id="stateTitle"></h3>
+      <p id="stateText"></p>
+      <button type="button" class="btn" id="stateAction" hidden></button>
+    </div>
+  </div>
+
+  <div class="more" id="moreWrap" hidden>
+    <button type="button" class="btn btn--wide" id="moreBtn"></button>
+  </div>
+
+  <div class="skeleton" id="skeleton">
+    <div class="sk-card"><div class="sk-img"></div><div class="sk-line"></div><div class="sk-line sk-line--short"></div></div>
+    <div class="sk-card"><div class="sk-img"></div><div class="sk-line"></div><div class="sk-line sk-line--short"></div></div>
+    <div class="sk-card"><div class="sk-img"></div><div class="sk-line"></div><div class="sk-line sk-line--short"></div></div>
+    <div class="sk-card"><div class="sk-img"></div><div class="sk-line"></div><div class="sk-line sk-line--short"></div></div>
+    <div class="sk-card"><div class="sk-img"></div><div class="sk-line"></div><div class="sk-line sk-line--short"></div></div>
+    <div class="sk-card"><div class="sk-img"></div><div class="sk-line"></div><div class="sk-line sk-line--short"></div></div>
+  </div>
+</main>
+
+<footer class="footer">
+  <div class="wrap footer__inner">
+    <div class="footer__col">
+      <p class="footer__note" data-i18n="footerNote">Headlines are sourced from each publisher's public RSS feed and link back to the original article. All rights belong to the respective publishers.</p>
+      <p class="footer__note footer__note--dim" id="mtNote" data-i18n="mtNote">Chinese titles and summaries are machine translated for convenience only. Always refer to the original article for accuracy.</p>
+    </div>
+    <div class="footer__col footer__col--right">
+      <div class="stats" id="stats"></div>
+      <p class="footer__build" id="buildNote"></p>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,102 @@
+name: Daily news update
+
+# 00:00 UTC == 08:00 in Asia/Shanghai (China has no daylight saving).
+on:
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:
+    inputs:
+      translate:
+        description: Translate headlines into Chinese
+        type: boolean
+        default: true
+      per_category:
+        description: Stories to keep per category
+        type: string
+        default: "30"
+
+# needed: write = commit the new edition, pages/id-token = deploy the site
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+# never let two editions race each other
+concurrency:
+  group: daily-news
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Fetch and commit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      edition: ${{ steps.build.outputs.edition }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # The pipeline is standard-library only - nothing to install.
+      - name: Build the edition
+        id: build
+        env:
+          # Optional. Without them the free (rate limited) endpoints are used
+          # and anything untranslated simply falls back to English.
+          DEEPL_API_KEY: ${{ secrets.DEEPL_API_KEY }}
+          GOOGLE_TRANSLATE_API_KEY: ${{ secrets.GOOGLE_TRANSLATE_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          ARGS=""
+          if [ "${{ github.event.inputs.translate }}" = "false" ]; then
+            ARGS="$ARGS --no-translate"
+          fi
+          if [ -n "${{ github.event.inputs.per_category }}" ]; then
+            ARGS="$ARGS --per-category ${{ github.event.inputs.per_category }}"
+          fi
+
+          # shellcheck disable=SC2086  # deliberate word splitting of ARGS
+          python scripts/build.py $ARGS
+
+          EDITION=$(python -c "import json; print(json.load(open('docs/data/latest.json'))['edition'])")
+          echo "edition=$EDITION" >> "$GITHUB_OUTPUT"
+
+      - name: Commit the new edition
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/data scripts/.cache/translations.json
+          if git diff --staged --quiet; then
+            echo "No change since the last run."
+          else
+            git commit -m "chore(news): edition ${{ steps.build.outputs.edition }}"
+            git push
+          fi
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload the site
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
