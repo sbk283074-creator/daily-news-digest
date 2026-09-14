@@ -38,6 +38,14 @@ TRANSLATE_BATCH = 12
 
 USER_AGENT = "Mozilla/5.0 (compatible; DailyBriefBot/1.0; +https://github.com/)"
 
+# Used only as a second attempt after a feed answers with an HTML bot wall.
+# Such walls routinely pass a top-level browser navigation and block anything
+# that looks like a feed reader, so the retry has to look like the former.
+BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+)
+
 # --- categories ---------------------------------------------------------------
 
 CATEGORIES = [
@@ -164,9 +172,13 @@ FEEDS = [
         "home": "https://www.nature.com",
         "category": "science",
         "url": "https://www.nature.com/nature.rss",
-        # A single second endpoint: Nature's edge occasionally answers a
-        # datacentre IP with an HTML challenge page instead of the feed.
-        "fallbacks": ["https://www.nature.com/nature/current-issue.rss"],
+        # Nature's edge intermittently answers a datacentre IP with an HTML
+        # challenge page - and when it does, it does so for every endpoint.
+        # These are three front doors to the same feed, tried in order.
+        "fallbacks": [
+            "https://www.nature.com/nature/current-issue.rss",
+            "https://www.nature.com/nature/press_releases.rss",
+        ],
         # Nature is a weekly journal - a 72h window would yield one item a day.
         "max_age_hours": 24 * 14,
     },

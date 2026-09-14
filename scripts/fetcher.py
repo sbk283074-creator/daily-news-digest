@@ -24,6 +24,7 @@ from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 
 from config import (
+    BROWSER_USER_AGENT,
     FETCH_RETRIES as FEED_RETRIES,
     FEED_WORKERS,
     FETCH_TIMEOUT,
@@ -32,6 +33,26 @@ from config import (
     TRACKING_PARAMS,
     USER_AGENT,
 )
+
+# The two header sets http_get switches between. The feed-reader set is the
+# honest default; the browser set is only reached after a wall has been seen.
+_FEED_HEADERS = {
+    "User-Agent": USER_AGENT,
+    "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+_BROWSER_HEADERS = {
+    "User-Agent": BROWSER_USER_AGENT,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache",
+    "Pragma": "no-cache",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+}
 
 # --------------------------------------------------------------------------- #
 # HTTP
@@ -117,18 +138,16 @@ def http_get(
     Datacentre IPs get rate limited (NASA answers 429) and bot-walled (Nature
     answers 200 with an HTML challenge), so a naive fetch loop silently loses
     whole outlets. Here a retryable status or an HTML body both back off and
-    try again instead of failing the moment the first attempt goes wrong.
+    try again instead of failing the moment the first attempt goes wrong, and
+    a detected wall switches the retry to browser headers.
     """
     last: Exception | None = None
+    walled = False
     for attempt in range(retries + 1):
         try:
             req = urllib.request.Request(
                 url,
-                headers={
-                    "User-Agent": USER_AGENT,
-                    "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
-                    "Accept-Language": "en-US,en;q=0.9",
-                },
+                headers=_BROWSER_HEADERS if walled else _FEED_HEADERS,
             )
             try:
                 resp = urllib.request.urlopen(req, timeout=timeout)
@@ -149,9 +168,10 @@ def http_get(
             if attempt < retries:
                 time.sleep(exc.delay)
         except NonFeedPayload as exc:
-            # Usually a bot wall, occasionally a transient error page - one
-            # more try after a pause is worth it, then give up.
+            # Usually a bot wall, occasionally a transient error page. Retry
+            # once as a browser navigation, then again on the normal cadence.
             last = exc
+            walled = True
             if attempt < retries:
                 time.sleep(_backoff(attempt))
         except (urllib.error.URLError, socket.timeout, OSError, ValueError) as exc:
