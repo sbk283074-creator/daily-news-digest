@@ -3,7 +3,7 @@
 A self-hosted news digest that refreshes itself every morning at **08:00 Beijing time** and
 publishes straight to GitHub Pages. No server, no database, no hosting bill.
 
-It pulls from **16 hand-picked outlets**, ranks the stories, translates the headlines into
+It pulls from **18 hand-picked outlets**, ranks the stories, translates the headlines into
 Chinese, and commits the result back to the repository — which is also what triggers the
 site to redeploy.
 
@@ -15,7 +15,7 @@ site to redeploy.
               ┌──────────────────────────┼──────────────────────────┐
               ▼                          ▼                          ▼
      ┌────────────────┐        ┌──────────────────┐        ┌────────────────┐
-     │ fetch 16 feeds │        │  rank + dedupe   │        │ translate zh   │
+     │ fetch 18 feeds │        │  rank + dedupe   │        │ translate zh   │
      │ RSS / Atom /   │  ───▶  │  per-source cap  │  ───▶  │ (cached on     │
      │ RDF, concurrent│        │  72h freshness   │        │  disk, once)   │
      └────────────────┘        └──────────────────┘        └───────┬────────┘
@@ -37,10 +37,10 @@ site to redeploy.
 | **World** 国际头条 | BBC World · The Guardian · NPR · Al Jazeera |
 | **Technology** 科技 | Ars Technica · The Verge · WIRED · Hacker News |
 | **Business** 商业财经 | CNBC · MarketWatch · Guardian Business · The New York Times |
-| **Science** 科学 | ScienceDaily · NASA · Nature · Phys.org |
+| **Science** 科学 | ScienceDaily · NASA · Nature · Phys.org · Science News · New Scientist |
 
-Every headline links straight back to the publisher's own article. Nothing is re-hosted, and
-all rights stay with the original outlets.
+18 feeds in total. Every headline links straight back to the publisher's own article. Nothing
+is re-hosted, and all rights stay with the original outlets.
 
 ---
 
@@ -132,6 +132,8 @@ FEEDS = [
         "home": "https://www.bbc.com/news/world",
         "category": "world",         # world | tech | business | science
         "url": "https://feeds.bbci.co.uk/news/world/rss.xml",
+        # optional, tried in order when `url` errors or returns a non-feed body:
+        # "fallbacks": ["https://example.com/other-endpoint.rss"],
         # optional, per-feed override of MAX_AGE_HOURS:
         # "max_age_hours": 24 * 14,
     },
@@ -191,9 +193,11 @@ picks it up automatically.
 
 A few decisions that look fussy but matter:
 
-- **Per-feed isolation.** One dead feed must never take down the run. Failures are recorded in `feed_status` inside the JSON and shown in the footer as `16/16 feeds responded`.
+- **Per-feed isolation.** One dead feed must never take down the run. Failures are recorded in `feed_status` inside the JSON and shown in the footer as `18/18 feeds responded`, with the per-endpoint reason when something fails.
 - **Refuses to publish a broken edition.** If fewer than 20 stories survive filtering, the build exits non-zero and the previous edition stays live.
-- **Translation circuit breaker.** The first HTTP 429 retires that provider for the run instead of triggering a retry storm — the difference between a 40-second build and a hung one.
+- **Built for a datacentre IP.** GitHub runners share an IP pool that publishers rate limit aggressively: NASA answers `429`, and Nature has been seen answering `200` with an HTML challenge page. So `http_get` backs off between attempts (0.8s → 1.6s → 3.2s, with jitter), honours `Retry-After`, and treats an HTML body as a failed fetch rather than as a feed that happened to parse to nothing. `fallbacks` then gives each outlet a second endpoint to try. Running this from a home connection hides all of that; running it from CI does not.
+- **Redundant sources per category.** No category depends on one feed, so a blocked publisher costs a few cards rather than a whole section.
+- **Translation circuit breaker.** The first HTTP 429 retires that provider for the run instead of triggering a retry storm — the difference between a 40-second build and a hung one. Deferred strings stay English and are translated on the next run; the cache is committed, so nothing is ever translated twice.
 - **Tracking parameters are stripped** before an article URL is stored or hashed, so the same story from two pulls deduplicates correctly.
 
 ---
